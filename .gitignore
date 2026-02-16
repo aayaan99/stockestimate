@@ -1,0 +1,8 @@
+node_modules/
+dist/
+data/stock-data.txt
+*.tmp
+.DS_Store
+.env
+.env.local
+.vercel
