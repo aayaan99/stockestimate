@@ -2,41 +2,45 @@ import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react'
 import { calculateAll } from '../utils/calculations';
 import ChemicalForm from './ChemicalForm';
 
-/** Inline editable number input — saves on blur, not on every keystroke */
-function InlineNumberInput({ value, onChange, style, min = 0 }) {
-  const [local, setLocal] = useState(value);
-  const ref = useRef(null);
+/**
+ * Uncontrolled inline number input.
+ * Uses defaultValue + ref so React NEVER re-renders this input during typing.
+ * Saves only on blur or Enter.
+ */
+const InlineNumberInput = React.memo(function InlineNumberInput({ value, onChange, style, min = 0 }) {
+  const inputRef = useRef(null);
+  const lastCommitted = useRef(value);
 
-  // Sync from parent when value changes externally (e.g., after save recalculates)
-  useEffect(() => { setLocal(value); }, [value]);
+  // Sync from parent ONLY when not focused (e.g., after a different field saves)
+  useEffect(() => {
+    lastCommitted.current = value;
+    if (inputRef.current && document.activeElement !== inputRef.current) {
+      inputRef.current.value = value;
+    }
+  }, [value]);
 
-  const handleBlur = () => {
-    const num = Number(local);
-    if (!isNaN(num) && num !== value) {
+  const commit = useCallback(() => {
+    const raw = inputRef.current?.value;
+    const num = raw === '' ? 0 : Number(raw);
+    if (!isNaN(num) && num !== lastCommitted.current) {
+      lastCommitted.current = num;
       onChange(num);
     }
-  };
-
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter') {
-      e.target.blur(); // triggers handleBlur
-    }
-  };
+  }, [onChange]);
 
   return (
     <input
-      ref={ref}
+      ref={inputRef}
       className="inline-input"
       type="number"
       min={min}
-      value={local}
-      onChange={e => setLocal(e.target.value)}
-      onBlur={handleBlur}
-      onKeyDown={handleKeyDown}
+      defaultValue={value}
+      onBlur={commit}
+      onKeyDown={e => e.key === 'Enter' && e.target.blur()}
       style={style}
     />
   );
-}
+});
 
 export default function InventoryTable({ chemicals, config, onSave, onConfigChange, toast }) {
   const [showForm, setShowForm] = useState(false);
@@ -49,7 +53,14 @@ export default function InventoryTable({ chemicals, config, onSave, onConfigChan
   const [overIndex, setOverIndex] = useState(null);
   const dragRef = useRef(null);
 
-  const result = useMemo(() => calculateAll(chemicals), [chemicals]);
+  // Local copy of chemicals for instant inline edits (no lag)
+  const [localChemicals, setLocalChemicals] = useState(chemicals);
+  const saveTimer = useRef(null);
+
+  // Sync from parent when chemicals change externally (form save, delete, reorder)
+  useEffect(() => { setLocalChemicals(chemicals); }, [chemicals]);
+
+  const result = useMemo(() => calculateAll(localChemicals), [localChemicals]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return result.chemicals;
@@ -111,18 +122,25 @@ export default function InventoryTable({ chemicals, config, onSave, onConfigChan
     setEditChem(null);
   };
 
-  // Quick inline stock update — silent (no toast) since user is doing rapid edits
+  // Quick inline stock update — updates local state instantly, debounces server save
   const handleQuickUpdate = useCallback((chemId, field, value) => {
     const num = Number(value);
     if (isNaN(num)) return;
-    const updated = chemicals.map(c => {
-      if (c.id === chemId) {
-        return { ...c, [field]: num, lastUpdated: new Date().toISOString().split('T')[0] };
-      }
-      return c;
+    setLocalChemicals(prev => {
+      const updated = prev.map(c => {
+        if (c.id === chemId) {
+          return { ...c, [field]: num, lastUpdated: new Date().toISOString().split('T')[0] };
+        }
+        return c;
+      });
+      // Debounce server save — wait 500ms after last edit
+      clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => {
+        onSave(updated, null, { silent: true });
+      }, 500);
+      return updated;
     });
-    onSave(updated, null, { silent: true });
-  }, [chemicals, onSave]);
+  }, [onSave]);
 
   // === Reorder functions ===
   const moveItem = useCallback((fromId, toId) => {
