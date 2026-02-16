@@ -46,19 +46,20 @@ export default function App() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Save data to server
-  const saveData = useCallback(async (newChemicals, newConfig) => {
+  // Save data to server (silent=true skips the toast for inline edits)
+  const saveData = useCallback(async (newChemicals, newConfig, { silent = false } = {}) => {
     const chems = newChemicals || chemicals;
     const conf = newConfig || config;
     try {
-      await fetch(`${API}/data`, {
+      const res = await fetch(`${API}/data`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ chemicals: chems, config: conf }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setChemicals(chems);
       if (newConfig) setConfig(conf);
-      toast('Data saved');
+      if (!silent) toast('Data saved');
     } catch (err) {
       console.error('Failed to save data:', err);
       toast('Failed to save data', 'error');
@@ -73,10 +74,15 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ date: snapshotDate }),
       });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
       const data = await res.json();
       toast(`Snapshot saved for ${data.date}`);
     } catch (err) {
-      toast('Failed to save snapshot', 'error');
+      console.error('Snapshot error:', err);
+      toast(`Failed to save snapshot: ${err.message}`, 'error');
     }
   }, [toast, snapshotDate]);
 

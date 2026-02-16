@@ -1,6 +1,42 @@
-import React, { useState, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { calculateAll } from '../utils/calculations';
 import ChemicalForm from './ChemicalForm';
+
+/** Inline editable number input — saves on blur, not on every keystroke */
+function InlineNumberInput({ value, onChange, style, min = 0 }) {
+  const [local, setLocal] = useState(value);
+  const ref = useRef(null);
+
+  // Sync from parent when value changes externally (e.g., after save recalculates)
+  useEffect(() => { setLocal(value); }, [value]);
+
+  const handleBlur = () => {
+    const num = Number(local);
+    if (!isNaN(num) && num !== value) {
+      onChange(num);
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.target.blur(); // triggers handleBlur
+    }
+  };
+
+  return (
+    <input
+      ref={ref}
+      className="inline-input"
+      type="number"
+      min={min}
+      value={local}
+      onChange={e => setLocal(e.target.value)}
+      onBlur={handleBlur}
+      onKeyDown={handleKeyDown}
+      style={style}
+    />
+  );
+}
 
 export default function InventoryTable({ chemicals, config, onSave, onConfigChange, toast }) {
   const [showForm, setShowForm] = useState(false);
@@ -75,8 +111,8 @@ export default function InventoryTable({ chemicals, config, onSave, onConfigChan
     setEditChem(null);
   };
 
-  // Quick inline stock update
-  const handleQuickUpdate = (chemId, field, value) => {
+  // Quick inline stock update — silent (no toast) since user is doing rapid edits
+  const handleQuickUpdate = useCallback((chemId, field, value) => {
     const num = Number(value);
     if (isNaN(num)) return;
     const updated = chemicals.map(c => {
@@ -85,8 +121,8 @@ export default function InventoryTable({ chemicals, config, onSave, onConfigChan
       }
       return c;
     });
-    onSave(updated);
-  };
+    onSave(updated, null, { silent: true });
+  }, [chemicals, onSave]);
 
   // === Reorder functions ===
   const moveItem = useCallback((fromId, toId) => {
@@ -336,12 +372,9 @@ export default function InventoryTable({ chemicals, config, onSave, onConfigChan
                       </td>
                       <td style={{ color: '#64748b', fontSize: 12 }}>{c.category}</td>
                       <td className="number">
-                        <input
-                          className="inline-input"
-                          type="number"
-                          min="0"
+                        <InlineNumberInput
                           value={c.factoryStock}
-                          onChange={e => handleQuickUpdate(c.id, 'factoryStock', e.target.value)}
+                          onChange={val => handleQuickUpdate(c.id, 'factoryStock', val)}
                         />
                       </td>
                       <td className="number">
@@ -357,24 +390,18 @@ export default function InventoryTable({ chemicals, config, onSave, onConfigChan
                         {info.etas}
                       </td>
                       <td className="number">
-                        <input
-                          className="inline-input"
-                          type="number"
-                          min="0"
+                        <InlineNumberInput
                           value={c.localPurchase || 0}
-                          onChange={e => handleQuickUpdate(c.id, 'localPurchase', e.target.value)}
+                          onChange={val => handleQuickUpdate(c.id, 'localPurchase', val)}
                         />
                       </td>
                       <td className="number">
                         <strong>{c.total.toLocaleString()}</strong>
                       </td>
                       <td className="number">
-                        <input
-                          className="inline-input"
-                          type="number"
-                          min="0"
+                        <InlineNumberInput
                           value={c.usePerDay}
-                          onChange={e => handleQuickUpdate(c.id, 'usePerDay', e.target.value)}
+                          onChange={val => handleQuickUpdate(c.id, 'usePerDay', val)}
                           style={{ width: 65 }}
                         />
                       </td>
